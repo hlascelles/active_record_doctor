@@ -20,7 +20,14 @@ module ActiveRecordDoctor
 
       def message(from_table:, from_column:, from_type:, to_table:, to_column:, to_type:)
         # rubocop:disable Layout/LineLength
-        "#{from_table}.#{from_column} is a foreign key of type #{from_type} and references #{to_table}.#{to_column} of type #{to_type} - foreign keys should be of the same type as the referenced column"
+        if from_type == "integer" && to_type == "integer"
+          "#{from_table}.#{from_column} is an integer foreign key referencing #{to_table}.#{to_column} (integer). It should be bigint for future compatibility."
+        elsif from_type == "integer" && to_type == "bigint"
+          "#{from_table}.#{from_column} is an integer foreign key referencing #{to_table}.#{to_column} (bigint). It must be bigint."
+        else
+          # This case should ideally not be hit if the logic in detect is correct
+          "#{from_table}.#{from_column} (type #{from_type}) references #{to_table}.#{to_column} (type #{to_type}). Foreign key should be bigint."
+        end
         # rubocop:enable Layout/LineLength
       end
 
@@ -34,16 +41,26 @@ module ActiveRecordDoctor
             to_table = foreign_key.to_table
             to_column = column(to_table, foreign_key.primary_key)
 
-            next if from_column.sql_type == to_column.sql_type
+            # The desired state is that all FKs are bigint.
+            # If from_column (FK) is already bigint, it's fine.
+            next if from_column.sql_type == "bigint"
 
-            problem!(
-              from_table: table,
-              from_column: from_column.name,
-              from_type: from_column.sql_type,
-              to_table: to_table,
-              to_column: to_column.name,
-              to_type: to_column.sql_type
-            )
+            # If from_column (FK) is integer, it's a problem.
+            # The PK type (to_column.sql_type) is included in the message for context.
+            if from_column.sql_type == "integer"
+              problem!(
+                from_table: table,
+                from_column: from_column.name,
+                from_type: from_column.sql_type,
+                to_table: to_table,
+                to_column: to_column.name,
+                to_type: to_column.sql_type
+              )
+            end
+            # Cases where from_column.sql_type is neither 'bigint' nor 'integer' (e.g. uuid)
+            # are not considered a problem by this specific detector's new logic.
+            # Also, if PK is `integer` and FK is `bigint` this is fine.
+            # If PK is `bigint` and FK is `bigint` this is fine.
           end
         end
       end
